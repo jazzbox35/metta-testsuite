@@ -403,8 +403,7 @@ all_option_value_name_default_type_help('exec', noskip, [noskip, skip], "Control
 
 % Resource Limits
 option_value_name_default_type_help('stack-max', 500, [inf,1000,10_000], "Maximum stack depth allowed during execution", 'Resource Limits').
-all_option_value_name_default_type_help('maximum-result-count', inf, [inf,1,2,3,10], "Set the maximum number of results, infinite by default", 'Miscellaneous').
-option_value_name_default_type_help('limit', inf, [inf,1,2,3,10], "Set the maximum number of results, infinite by default", 'Miscellaneous').
+all_option_value_name_default_type_help('limit-result-count', inf, [inf,1,2,3,10], "Set the maximum number of results, infinite by default", 'Miscellaneous').
 option_value_name_default_type_help('initial-result-count', 10, [inf,10], "For MeTTaLog log mode: print the first 10 answers without waiting for user", 'Miscellaneous').
 
 % Miscellaneous
@@ -562,7 +561,8 @@ set_option_value_interp(N,V):- symbol(N), symbolic_list_concat(List,',',N),List\
 set_option_value_interp(N,V):-
   %(different_from(N,V)->Note=true;Note=false),
   Note = true,
-  fbugio(Note,set_option_value(N,V)),set_option_value(N,V),
+  %fbugio(Note,set_option_value(N,V)),
+  set_option_value(N,V),
   ignore(forall(on_set_value(Note,N,V),true)).
 
 on_set_value(Note,N,'True'):- on_set_value(Note,N,true).
@@ -648,8 +648,10 @@ with_answer_output(Goal, S) :-
     ).
 
 null_io(G):- null_user_output(Out), !, with_output_to(Out,G).
-user_io(G):- current_prolog_flag(mettalog_rt, true), !, original_user_error(Out), ttyflush, !, with_output_to(Out,G), flush_output(Out), ttyflush.
-user_io(G):- original_user_output(Out), ttyflush, !, with_output_to(Out,G), flush_output(Out), ttyflush.
+
+user_io(G):- notrace(user_io_0(G)).
+user_io_0(G):- current_prolog_flag(mettalog_rt, true), !, original_user_error(Out), ttyflush, !, with_output_to(Out,G), flush_output(Out), ttyflush.
+user_io_0(G):- original_user_output(Out), ttyflush, !, with_output_to(Out,G), flush_output(Out), ttyflush.
 user_err(G):- original_user_error(Out), !, with_output_to(Out,G).
 with_output_to_s(Out,G):- current_output(COut),
   redo_call_cleanup(set_prolog_IO(user_input, Out,user_error), G,
@@ -669,8 +671,10 @@ not_compatio(G):- if_t(once(is_mettalog;is_testing; (\+ is_compatio )),
 %   If output is not suspended, it captures the output based on the streams involved.
 %
 %   @arg G The goal to be executed.
-in_answer_io(_):- nb_current(suspend_answers,true),!.
-in_answer_io(G) :-
+
+in_answer_io(G):- notrace((in_answer_io_0(G))).
+in_answer_io_0(_):- nb_current(suspend_answers,true),!.
+in_answer_io_0(G) :-
     % Get the answer_output stream
     answer_output(AnswerOut),
     % Get the current output stream
@@ -1098,7 +1102,7 @@ cmdline_load_metta(Phase,Self,['-G',Str|Rest]):- !,
 cmdline_load_metta(Phase,Self,[M|Rest]):-
   m_opt(M,Opt),
   is_cmd_option(Opt,M,TF),
-  fbug(is_cmd_option(Phase,Opt,M,TF)),
+  %fbug(is_cmd_option(Phase,Opt,M,TF)),
   set_option_value_interp(Opt,TF), !,
   %set_tty_color_term(true),
   cmdline_load_metta(Phase,Self,Rest).
@@ -1396,10 +1400,10 @@ do_show_options_values:-
 
 :- dynamic(metta_atom_asserted/2).
 :- multifile(metta_atom_asserted/2).
-:- dynamic(metta_atom_asserted_deduced/2).
-:- multifile(metta_atom_asserted_deduced/2).
+:- dynamic(metta_atom_deduced/2).
+:- multifile(metta_atom_deduced/2).
 metta_atom_asserted(X,Y):-
-    metta_atom_asserted_deduced(X,Y),
+    metta_atom_deduced(X,Y),
     \+ clause(metta_atom_asserted(X,Y),true).
 
 
@@ -1435,26 +1439,36 @@ should_inherit_from_corelib([H,A|T]):- fail,
   % \+ \+ metta_atom_asserted('&corelib',[=,[F|_]|_]),
   write_src_uo([H,A|T]).
 
-/*
-should_inherit_op_from_corelib('=').
+
+is_code_inheritor(KB):- current_self(KB).  % code runing from a KB can see corlib
+%should_inherit_op_from_corelib('=').
 should_inherit_op_from_corelib(':').
 should_inherit_op_from_corelib('@doc').
 %should_inherit_op_from_corelib(_).
-*/
+
 metta_atom_asserted('&self','&corelib').
 metta_atom_asserted('&self','&stdlib').
+metta_atom_asserted('top','&corelib').
+metta_atom_asserted('top','&stdlib').
 metta_atom_asserted('&stdlib','&corelib').
 metta_atom_asserted('&flybase','&corelib').
 metta_atom_asserted('&catalog','&corelib').
 metta_atom_asserted('&catalog','&stdlib').
 
-/*
+maybe_resolve_space_dag(Var,[XX]):- var(Var),!, \+ attvar(Var), freeze(XX,space_to_ctx(XX,Var)).
+maybe_resolve_space_dag('&self',[Self]):- current_self(Self).
+in_dag(X,XX):- is_list(X),!,member(XX,X).
+in_dag(X,X).
+
+space_to_ctx(Top,Var):- nonvar(Top),current_self(Top),!,Var='&self'.
+space_to_ctx(Top,Var):- 'mod-space'(Top,Var).
+
 'mod-space'(top,'&self').
 'mod-space'(catalog,'&catalog').
 'mod-space'(corelib,'&corelib').
 'mod-space'(stdlib,'&stdlib').
 'mod-space'(Top,'&self'):- Top == self.
-*/
+
 not_metta_atom_corelib(A,N):-  A \== '&corelib' , metta_atom('&corelib',N).
 
 %metta_atom_asserted_fallback( KB,Atom):- metta_atom_stdlib(KB,Atom)
@@ -1764,7 +1778,7 @@ do_metta(From,call,Self,TermV,FOut):- !,
    call_for_term_variables(TermV,Term,NamedVarsList,X), must_be(nonvar,Term),
    copy_term(NamedVarsList,Was),
    Output = NamedVarsList,
-   user:interactively_do_metta_exec(From,Self,TermV,Term,X,NamedVarsList,Was,Output,FOut).
+   user:u_do_metta_exec(From,Self,TermV,Term,X,NamedVarsList,Was,Output,FOut).
 
 do_metta(_File,Load,Self,Src,Out):- Load\==exec, !,
    if_t(into_simple_op(Load,Src,OP),pfcAdd_Now('next-operation'(OP))),
@@ -1793,10 +1807,12 @@ do_metta(From,exec,Self,TermV,Out):- !,
 do_metta_exec(From,Self,TermV,FOut):-
   Output = X,
    %format("########################X0 ~w ~w ~w\n",[Self,TermV,FOut]),
- (catch(((output_language(metta,write_exec(TermV)),
+ (catch(((
+   % Show exec from file(_)
+   if_t(From=file(_),output_language(metta,write_exec(TermV))),
    notrace(into_metta_callable(Self,TermV,Term,X,NamedVarsList,Was)),!,
    %format("########################X1 ~w ~w ~w ~w\n",[Term,X,NamedVarsList,Output]),
-   user:interactively_do_metta_exec(From,Self,TermV,Term,X,NamedVarsList,Was,Output,FOut))),
+   user:u_do_metta_exec(From,Self,TermV,Term,X,NamedVarsList,Was,Output,FOut))),
    give_up(Why),pp_m(red,gave_up(Why)))).
    %format("########################X2 ~w ~w ~w\n",[Self,TermV,FOut]).
 
